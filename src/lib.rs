@@ -57,14 +57,15 @@ pub fn convert_texture(output: &Path, input: &Path, overwrite: bool) -> Result<(
                     overwrite,
                 );
             }
-            return Err("Failed to read file".to_string());
+            return Err(format!("Failed to read file: {}", input.display()));
         }
-        return Err(
-            "Failed to read image dimensions. (Potentially failed to read file)".to_string(),
-        );
+        return Err(format!(
+            "Failed to read image dimensions or file: {}",
+            input.display()
+        ));
     }
 
-    Err("File does not exist.".to_string())
+    Err(format!("File {} does not exist.", input.display()))
 }
 
 pub fn convert_cubemap(output: &Path, inputs: Vec<&Path>, overwrite: bool) -> Result<(), String> {
@@ -77,15 +78,19 @@ pub fn convert_cubemap(output: &Path, inputs: Vec<&Path>, overwrite: bool) -> Re
         if input.exists() {
             if let Ok(dimension) = image::image_dimensions(input) {
                 if dimension.0 != dimension.1 {
-                    return Err(
-                        "Cubemap textures need to be quadratic. Width == Height".to_string()
-                    );
+                    return Err(format!(
+                        "Cubemap textures need to be quadratic. File: {}, ",
+                        input.display()
+                    ));
                 }
 
                 if size == 0 {
                     size = dimension.0;
                 } else if dimension.0 != size {
-                    return Err("All textures must have the same size.".to_string());
+                    return Err(format!(
+                        "All textures must have the same size. File {}",
+                        input.display()
+                    ));
                 }
 
                 if format.is_none() {
@@ -96,17 +101,20 @@ pub fn convert_cubemap(output: &Path, inputs: Vec<&Path>, overwrite: bool) -> Re
 
                 if let Ok(texture) = std::fs::read(input) {
                     textures.push(texture);
+                } else {
+                    return Err(format!("Failed to read file: {}", input.display()));
                 }
-                return Err("Failed to read file".to_string());
+            } else {
+                return Err(format!(
+                    "Failed to read image dimensions or file: {}",
+                    input.display()
+                ));
             }
-            return Err(
-                "Failed to read image dimensions. (Potentially failed to read file)".to_string(),
-            );
         }
     }
 
     if size == 0 {
-        return Err("Invalid texture size.".to_string());
+        return Err("Invalid texture count.".to_string());
     }
 
     write_cubemap(output, &textures, size, format, overwrite)
@@ -119,15 +127,19 @@ pub fn write_cubemap(
     format: Option<String>,
     overwrite: bool,
 ) -> Result<(), String> {
-    if output.exists() && !overwrite {
-        return Err("File already exists.".to_string());
+    if output.exists() {
+        if overwrite {
+            log::warn!("Overwrite flag set. Overwriting file {}", output.display());
+        } else {
+            return Err(format!("File {} already exists.", output.display()));
+        }
     }
 
     let mut entries = Vec::<Entry>::new();
     let mut offset = 0;
     let keys = ["-x", "+x", "-y", "+y", "-z", "+z"];
 
-    for i in 0..5 {
+    for i in 0..6 {
         entries.push(Entry {
             key: keys[i].to_string(),
             offset,
@@ -147,17 +159,23 @@ pub fn write_cubemap(
     };
 
     if output.parent().is_none() {
-        return Err("No parent folder.".to_string());
+        return Err(format!("{} has no parent folder.", output.display()));
     }
 
     if let Err(e) = std::fs::create_dir_all(output.parent().unwrap()) {
-        return Err(format!("Could not create parent folders. Message: {}", e));
+        return Err(format!(
+            "Could not create parent folders of {}. Message: {}",
+            output.display(),
+            e
+        ));
     }
 
     if let Ok(content) = serde_json::to_string(&header) {
+        let size: u64 = content.as_bytes().len() as u64;
         return std::fs::write(
             output,
             [
+                &size.to_be_bytes(),
                 content.as_bytes(),
                 textures[0].as_bytes(),
                 textures[1].as_bytes(),
@@ -171,7 +189,10 @@ pub fn write_cubemap(
         .map_err(|error| error.to_string());
     }
 
-    Err("Could not serialize header.".to_string())
+    Err(format!(
+        "Could not serialize header of {}.",
+        output.display()
+    ))
 }
 
 pub fn write_texture(
@@ -182,8 +203,12 @@ pub fn write_texture(
     height: u32,
     overwrite: bool,
 ) -> Result<(), String> {
-    if output.exists() && !overwrite {
-        return Err("File already exists.".to_string());
+    if output.exists() {
+        if overwrite {
+            log::warn!("Overwrite flag set. Overwriting file {}", output.display());
+        } else {
+            return Err(format!("File {} already exists.", output.display()));
+        }
     }
 
     let header = FurHeader {
@@ -198,11 +223,15 @@ pub fn write_texture(
     };
 
     if output.parent().is_none() {
-        return Err("No parent folder.".to_string());
+        return Err(format!("{} has no parent folder.", output.display()));
     }
 
     if let Err(e) = std::fs::create_dir_all(output.parent().unwrap()) {
-        return Err(format!("Could not create parent folders. Message: {}", e));
+        return Err(format!(
+            "Could not create parent folders of {}. Message: {}",
+            output.display(),
+            e
+        ));
     }
 
     if let Ok(content) = serde_json::to_string(&header) {
@@ -214,12 +243,15 @@ pub fn write_texture(
         .map_err(|error| error.to_string());
     }
 
-    Err("Could not serialize header.".to_string())
+    Err(format!(
+        "Could not serialize header of {}.",
+        output.display()
+    ))
 }
 
 pub fn read_texture(path: &Path) -> Result<(Vec<u8>, (u32, u32)), String> {
     if !path.exists() {
-        return Err("File does not exist.".to_string());
+        return Err(format!("File {} does not exist.", path.display()));
     }
 
     if let Ok(file) = std::fs::read(path) {
@@ -234,19 +266,25 @@ pub fn read_texture(path: &Path) -> Result<(Vec<u8>, (u32, u32)), String> {
                     file[(size as usize + 7)..].to_vec(),
                     (texture_meta.width, texture_meta.height),
                 )),
-                _ => Err("Invalid asset type. Expected texture.".to_string()),
+                _ => Err(format!(
+                    "Invalid asset type of {}. Expected texture.",
+                    path.display()
+                )),
             };
         }
 
-        return Err("Failed to deserialize meta data. Invalid format.".to_string());
+        return Err(format!(
+            "Failed to deserialize meta data of {}. Invalid format.",
+            path.display()
+        ));
     }
 
-    Err("Failed to open file.".to_string())
+    Err(format!("Failed to open file: {}", path.display()))
 }
 
 pub fn read_cubemap(path: &Path) -> Result<(Vec<(String, Vec<u8>)>, u32), String> {
     if !path.exists() {
-        return Err("File does not exist.".to_string());
+        return Err(format!("File {} does not exist.", path.display()));
     }
 
     if let Ok(file) = std::fs::read(path) {
@@ -274,12 +312,20 @@ pub fn read_cubemap(path: &Path) -> Result<(Vec<(String, Vec<u8>)>, u32), String
                     }
                     return Ok((textures, cubemap_meta.size));
                 }
-                _ => return Err("Invalid asset type. Expected texture.".to_string()),
+                _ => {
+                    return Err(format!(
+                        "Invalid asset type of {}. Expected texture.",
+                        path.display()
+                    ))
+                }
             }
         }
 
-        return Err("Failed to deserialize meta data. Invalid format.".to_string());
+        return Err(format!(
+            "Failed to deserialize meta data of {}. Invalid format.",
+            path.display()
+        ));
     }
 
-    Err("Failed to open file.".to_string())
+    Err(format!("Failed to open file: {}", path.display()))
 }

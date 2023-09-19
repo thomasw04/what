@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{env, path::Path};
 
 use clap::{Args, Parser, Subcommand};
 use log::{Level, LevelFilter};
@@ -45,12 +45,17 @@ fn main() {
 
     let cli = Cli::parse();
 
+    log::info!(
+        "Current working dir: {}",
+        env::current_dir().unwrap().display()
+    );
+
     match &cli.command {
         Commands::Convert(args) => {
             let inputs = args.input.iter().map(Path::new).collect::<Vec<&Path>>();
 
             match 1.cmp(&args.input.len()) {
-                std::cmp::Ordering::Greater => {
+                std::cmp::Ordering::Less => {
                     let output = args
                         .output
                         .clone()
@@ -58,6 +63,8 @@ fn main() {
 
                     if let Err(e) = convert_cubemap(Path::new(&output), inputs, args.overwrite) {
                         log::error!("{}", e);
+                    } else {
+                        log::info!("Successfully created file {}", output);
                     }
                 }
                 std::cmp::Ordering::Equal => {
@@ -80,10 +87,12 @@ fn main() {
 
                     if let Err(e) = convert_texture(Path::new(&output), inputs[0], args.overwrite) {
                         log::error!("{}", e);
+                    } else {
+                        log::info!("Successfully created file {}", output);
                     }
                 }
-                std::cmp::Ordering::Less => {
-                    panic!("Please provide an input file path.");
+                std::cmp::Ordering::Greater => {
+                    log::error!("Please provide an input file path.");
                 }
             }
         }
