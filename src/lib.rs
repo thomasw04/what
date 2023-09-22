@@ -1,11 +1,35 @@
 use image::EncodableLayout;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{collections::HashMap, io::Read, path::Path, vec};
 
+//Public Types
+pub enum Asset {
+    Texture {
+        width: u32,
+        height: u32,
+        data: Vec<u8>,
+    },
+    Cubemap {
+        size: u32,
+        data: HashMap<String, Vec<u8>>,
+    },
+    Glb {
+        data: Vec<u8>,
+    },
+}
+
+pub enum AssetType {
+    Texture,
+    Cubemap,
+    Glb,
+}
+
+//Internal Types
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 struct Entry {
     key: String,
     offset: u64,
+    size: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -143,6 +167,7 @@ pub fn write_cubemap(
         entries.push(Entry {
             key: keys[i].to_string(),
             offset,
+            size: textures[i].len() as u64,
         });
 
         offset += textures[i].len() as u64;
@@ -249,83 +274,79 @@ pub fn write_texture(
     ))
 }
 
-pub fn read_texture(path: &Path) -> Result<(Vec<u8>, (u32, u32)), String> {
+pub fn read_asset(path: &Path) -> Result<Asset, String> {
     if !path.exists() {
         return Err(format!("File {} does not exist.", path.display()));
     }
 
-    if let Ok(file) = std::fs::read(path) {
-        //Convert to size
-        let mut size_buf = [0u8; 8];
-        size_buf[..8].copy_from_slice(&file.as_bytes()[..8]);
-        let size = u64::from_be_bytes(size_buf);
+    match std::fs::File::open(path) {
+        Ok(mut file) => match read_header(&mut file) {
+            Ok(header) => match header.ctype {
+                Type::Texture(meta) => {
+                    let mut data = Vec::<u8>::new();
+                    let res = file.read_to_end(&mut data);
 
-        if let Ok(meta) = serde_json::from_slice::<FurHeader>(&file[8..(size as usize + 7)]) {
-            return match meta.ctype {
-                Type::Texture(texture_meta) => Ok((
-                    file[(size as usize + 7)..].to_vec(),
-                    (texture_meta.width, texture_meta.height),
-                )),
-                _ => Err(format!(
-                    "Invalid asset type of {}. Expected texture.",
-                    path.display()
-                )),
-            };
-        }
+                    if let Err(e) = res {
+                        return Err(format!("{}", e));
+                    }
 
-        return Err(format!(
-            "Failed to deserialize meta data of {}. Invalid format.",
-            path.display()
-        ));
+                    Ok(Asset::Texture {
+                        width: meta.width,
+                        height: meta.height,
+                        data,
+                    })
+                }
+                Type::Cubemap(meta) => {
+                    let mut data = HashMap::<String, Vec<u8>>::new();
+
+                    for entry in meta.data {
+                        data.insert(entry.key.clone(), vec![0 as u8; entry.size as usize]);
+                        let res = file.read_exact(
+                            data.get_mut(&entry.key)
+                                .expect("This is impossible the fail. What did you do?"),
+                        );
+
+                        if let Err(e) = res {
+                            return Err(format!("{}", e));
+                        }
+                    }
+
+                    Ok(Asset::Cubemap {
+                        size: meta.size,
+                        data: data,
+                    })
+                }
+                Type::Glb(_meta) => {
+                    let mut data = Vec::<u8>::new();
+                    let res = file.read_to_end(&mut data);
+
+                    if let Err(e) = res {
+                        return Err(format!("{}", e));
+                    }
+
+                    Ok(Asset::Glb { data })
+                }
+            },
+            Err(e) => Err(format!("{}", e)),
+        },
+        Err(e) => Err(format!("{}", e)),
     }
-
-    Err(format!("Failed to open file: {}", path.display()))
 }
 
-pub fn read_cubemap(path: &Path) -> Result<(Vec<(String, Vec<u8>)>, u32), String> {
-    if !path.exists() {
-        return Err(format!("File {} does not exist.", path.display()));
+fn read_header(file: &mut std::fs::File) -> Result<FurHeader, String> {
+    let mut size_buf = [0u8; 8];
+    if let Err(e) = file.read_exact(&mut size_buf) {
+        return Err(format!("{}", e));
+    }
+    let size = u64::from_be_bytes(size_buf);
+
+    let mut header_buf = vec![0 as u8; size as usize];
+    if let Err(e) = file.read_exact(&mut header_buf) {
+        return Err(format!("{}", e));
     }
 
-    if let Ok(file) = std::fs::read(path) {
-        //Convert to size
-        let mut size_buf = [0u8; 8];
-        size_buf[..8].copy_from_slice(&file.as_bytes()[..8]);
-        let size = u64::from_be_bytes(size_buf);
-
-        if let Ok(meta) = serde_json::from_slice::<FurHeader>(&file[8..(size as usize + 7)]) {
-            match meta.ctype {
-                Type::Cubemap(cubemap_meta) => {
-                    let mut textures = Vec::<(String, Vec<u8>)>::new();
-                    for (i, entry) in cubemap_meta.data.iter().enumerate() {
-                        let default_end = Entry {
-                            key: "".to_string(),
-                            offset: u64::MAX,
-                        };
-                        let end = cubemap_meta.data.get(i + 1).unwrap_or(&default_end);
-                        textures.push((
-                            entry.key.clone(),
-                            file[((size as usize + 7) + entry.offset as usize)
-                                ..end.offset as usize]
-                                .to_vec(),
-                        ));
-                    }
-                    return Ok((textures, cubemap_meta.size));
-                }
-                _ => {
-                    return Err(format!(
-                        "Invalid asset type of {}. Expected texture.",
-                        path.display()
-                    ))
-                }
-            }
-        }
-
-        return Err(format!(
-            "Failed to deserialize meta data of {}. Invalid format.",
-            path.display()
-        ));
+    match serde_json::from_slice::<FurHeader>(header_buf.as_slice()) {
+        Ok(meta) => Ok(meta),
+        Err(e) => return Err(format!("{}", e)),
     }
-
-    Err(format!("Failed to open file: {}", path.display()))
 }
