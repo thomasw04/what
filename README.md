@@ -1,6 +1,8 @@
 # Rusty-Bear-Engine Asset Utility (What)
 This utility program, known as "What," is an essential tool for working with the Rusty-Bear-Engine. It helps identify assets and converts them into a format that the engine can easily read.
 
+__Note__: I will extend this format on-demand when RustyBear-Engine development progresses. 
+
 ## Features (Current)
  - __Texture Conversion__: Convert textures and texture arrays to the .fur file format, which  is the main asset format for the Rusty-Bear-Engine. This format stores everything neatly in a single file. Currently, it stores textures as PNG binary blobs within the .fur file.
  - __Texture Loading__: Load textures and texture arrays from a .fur file.
