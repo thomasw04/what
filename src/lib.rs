@@ -1,22 +1,24 @@
 use image::EncodableLayout;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{fmt::format, path::Path};
+
+mod importer;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-struct Entry {
+struct HeaderEntry {
     key: String,
     offset: u64,
 }
 
 #[derive(Serialize, Deserialize)]
-enum Type {
-    Texture(TextureMeta),
-    Cubemap(CubemapMeta),
-    Glb(GlbMeta),
+enum HeaderType {
+    Texture(HeaderTexture),
+    Cubemap(HeaderCubemap),
+    Glb(HeaderGlb),
 }
 
 #[derive(Serialize, Deserialize)]
-struct TextureMeta {
+struct HeaderTexture {
     width: u32,
     height: u32,
     format: Option<String>,
@@ -24,14 +26,14 @@ struct TextureMeta {
 }
 
 #[derive(Serialize, Deserialize)]
-struct CubemapMeta {
+struct HeaderCubemap {
     size: u32,
     format: Option<String>,
-    data: Vec<Entry>,
+    data: Vec<HeaderEntry>,
 }
 
 #[derive(Serialize, Deserialize)]
-struct GlbMeta {
+struct HeaderGlb {
     offset: u64,
 }
 
@@ -39,7 +41,17 @@ struct GlbMeta {
 struct FurHeader {
     major: u16,
     minor: u16,
-    ctype: Type,
+    ctype: HeaderType,
+}
+
+pub enum Asset {
+    Texture((Vec<u8>, (u32, u32))),
+    Cubemap(Vec<(Vec<u8>, (u32, u32))>),
+    Glb()
+}
+
+pub fn test() {
+    gltf::import_buffers()
 }
 
 pub fn convert_texture(output: &Path, input: &Path, overwrite: bool) -> Result<(), String> {
@@ -247,6 +259,94 @@ pub fn write_texture(
         "Could not serialize header of {}.",
         output.display()
     ))
+}
+
+trait Backend {
+    fn read_file(&self, path: String) -> Result<Vec<u8>, String>;
+    fn write_file(&self, path: String, bytes: Vec<u8>, overwrite: bool) -> Result<(), String>;
+}
+
+struct What {}
+
+#[cfg(target_arch = "wasm32")]
+impl Backend for What {
+    fn read_file(&self, path: String) -> Result<Vec<u8>, String> {
+        const MAX_REQUESTS: usize = 5;
+
+        for i in 0..MAX_REQUESTS {
+            match ureq::get(&path).call() {
+                Ok(file) => {
+                    let mut bytes: Vec<u8> = if let Some(value) = file.header("Content-Length") {
+                        value.parse().map_or(Vec::new(), Vec::with_capacity)
+                    } else {
+                        Vec::new()
+                    };
+
+                    return if let Err(err) = file.into_reader().read_to_end(&mut bytes) {
+                        Err(format!("Failed to read file at {}. Err: {}", path, err))
+                    } else {
+                        Ok(bytes)
+                    };
+                }
+                Err(err) => {
+                    log::warn!(
+                        "Failed to retrieve file {}. ({}/{MAX_REQUESTS}) Trying again. Err: {}",
+                        path,
+                        i + 1,
+                        err
+                    );
+                }
+            }
+        }
+
+        Err(format!("Failed to retrieve file {}.", path))
+    }
+
+    fn write_file(&self, _path: String, _bytes: Vec<u8>, _overwrite: bool) -> Result<(), String> {
+        unimplemented!("Files can only be written in native builds, not in WASM")
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Backend for What {
+    fn read_file(&self, path: String) -> Result<Vec<u8>, String> {
+        let path = Path::new(&path);
+
+        if !path.exists() {
+            return Err(format!("File {} does not exist.", path.display()));
+        }
+
+        std::fs::read(path)
+            .map_err(|err| format!("Failed to read file {}. Err: {}", path.display(), err))
+    }
+
+    fn write_file(&self, path: String, content: Vec<u8>, overwrite: bool) -> Result<(), String> {
+        let path = Path::new(&path);
+
+        if path.exists() {
+            if overwrite {
+                log::warn!("Overwrite flag set. Overwriting file {}", path.display());
+            } else {
+                return Err(format!("File {} already exists.", path.display()));
+            }
+        }
+
+        if let Err(e) = std::fs::create_dir_all(path.parent().unwrap()) {
+            return Err(format!(
+                "Could not create parent folders of {}. Err: {}",
+                path.display(),
+                e
+            ));
+        }
+
+        std::fs::write(path, content)
+            .map_err(|err| format!("Failed to write to file {}. Err: {}", path.display(), err))
+    }
+}
+
+impl What {
+    
+    pub fn 
 }
 
 pub fn read_texture(path: &Path) -> Result<(Vec<u8>, (u32, u32)), String> {
