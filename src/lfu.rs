@@ -3,7 +3,7 @@ use std::{
     hash::Hash,
 };
 
-trait ItemSize {
+pub trait ItemSize {
     fn size(&self) -> usize;
 }
 

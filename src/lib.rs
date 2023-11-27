@@ -1,4 +1,5 @@
 use backend::Backend;
+use error::Error;
 use image::EncodableLayout;
 use lfu::LfuCache;
 use serde::{Deserialize, Serialize};
@@ -8,6 +9,7 @@ use std::{
 };
 
 mod backend;
+mod error;
 mod lfu;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -52,7 +54,7 @@ struct FurHeader {
 
 pub enum Asset {
     Texture((Vec<u8>, (u32, u32))),
-    Cubemap(Vec<(u32, Vec<u8>, (u32, u32))>),
+    Cubemap(Vec<(String, Vec<u8>, (u32, u32))>),
     Glb(
         gltf::Document,
         Vec<gltf::buffer::Data>,
@@ -317,6 +319,7 @@ impl What {
             guid_generator: GuidGenerator::new(),
             paths: HashMap::new(),
             cache: LfuCache::new(max_size),
+            base: Location::File(PathBuf::from(".")),
         }
     }
 
@@ -324,16 +327,11 @@ impl What {
         self.cache.shrink_to_fit(max_size);
     }
 
-    pub fn load_file(&mut self, path: &str, priority: usize) -> Result<Vec<u8>, String> {
-        let key = self
+    pub fn load_file(&mut self, path: &str, priority: usize) -> Result<Vec<u8>, Error> {
+        let key = *self
             .paths
-            .get(path)
-            .unwrap_or_else(|| {
-                let guid = self.guid_generator.generate();
-                self.paths.insert(path.to_string(), guid);
-                &guid
-            })
-            .clone();
+            .entry(path.to_string())
+            .or_insert_with(|| self.guid_generator.generate());
 
         if let Some(data) = self.cache.get(&key) {
             return Ok(data.clone());
@@ -352,24 +350,24 @@ impl What {
         Ok(data)
     }
 
-    fn load_asset(&mut self, path: &str, priority: usize) -> Result<Asset, String> {
+    fn load_asset(&mut self, path: &str, priority: usize) -> Result<Asset, Error> {
         let data = self.load_file(path, priority)?;
 
         let mut size_buf = [0u8; 8];
         size_buf[..8].copy_from_slice(&data[..8]);
         let size = u64::from_be_bytes(size_buf);
 
-        if let Ok(meta) = serde_json::from_slice::<FurHeader>(&data) {
-            match meta.ctype {
+        match serde_json::from_slice::<FurHeader>(&data) {
+            Ok(meta) => match meta.ctype {
                 HeaderType::Texture(texture_meta) => {
                     let texture = self.load_file(path, priority)?;
-                    return Ok(Asset::Texture((
+                    Ok(Asset::Texture((
                         texture,
                         (texture_meta.width, texture_meta.height),
-                    )));
+                    )))
                 }
                 HeaderType::Cubemap(cubemap_meta) => {
-                    let mut textures = Vec::<(String, Vec<u8>)>::new();
+                    let mut textures = Vec::<(String, Vec<u8>, (u32, u32))>::new();
                     for (i, entry) in cubemap_meta.data.iter().enumerate() {
                         let default_end = HeaderEntry {
                             key: "".to_string(),
@@ -381,27 +379,31 @@ impl What {
                             data[((size as usize + 7) + entry.offset as usize)
                                 ..end.offset as usize]
                                 .to_vec(),
+                            (cubemap_meta.size, cubemap_meta.size),
                         ));
                     }
-                    return Ok(Asset::Cubemap(textures));
+                    Ok(Asset::Cubemap(textures))
                 }
                 HeaderType::Gltf(gltf_meta) => {
                     let slice = &data[(size as usize + 7 + gltf_meta.offset as usize)..];
-                    let gltf = gltf::Gltf::from_slice(slice)?;
-                    let base = match self.base {
-                        Location::File(path) => Some(path.as_path()),
+                    let base = match &self.base {
+                        Location::File(path) => Some(path.clone()),
                         _ => None,
                     };
 
-                    return gltf::import_slice(slice, base, |base, path| {
-                        self.load_file(&path, priority)
+                    return gltf::import_slice(slice, base.as_deref(), |base, path| {
+                        let res = self.load_file(path, priority);
+
+                        match res {
+                            Err(Error::Io(err)) => Err(gltf::Error::Io(err)),
+                            _ => Ok(res.unwrap()),
+                        }
                     })
-                    .map_err(|err| "Failed to load gltf asset.".to_string())
+                    .map_err(Error::GltfError)
                     .map(|(document, buffers, images)| Asset::Glb(document, buffers, images));
                 }
-            }
+            },
+            Err(err) => Err(Error::JsonError(err)),
         }
-
-        Err("Failed to deserialize meta data. Invalid format.".to_string())
     }
 }

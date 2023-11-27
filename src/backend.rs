@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 
+use crate::error::Error;
+
 pub trait Backend {
     fn read_file(
         base: Option<&Path>,
         path: &str,
-    ) -> Result<(Vec<u8>, Option<Vec<(String, Vec<u8>)>>), String>;
+    ) -> Result<(Vec<u8>, Option<Vec<(String, Vec<u8>)>>), Error>;
     fn write_file(path: &str, bytes: Vec<u8>, overwrite: bool) -> Result<(), String>;
 }
 
@@ -52,7 +54,7 @@ impl Backend for crate::What {
     fn read_file(
         base: Option<&Path>,
         path: &str,
-    ) -> Result<(Vec<u8>, Option<Vec<(String, Vec<u8>)>>), String> {
+    ) -> Result<(Vec<u8>, Option<Vec<(String, Vec<u8>)>>), Error> {
         let path = if let Some(base) = base {
             base.join(path)
         } else {
@@ -60,11 +62,14 @@ impl Backend for crate::What {
         };
 
         if !path.exists() {
-            return Err(format!("File {} does not exist.", path.display()));
+            return Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("File {} not found.", path.display()),
+            )));
         }
 
         std::fs::read(path)
-            .map_err(|err| format!("Failed to read file {}. Err: {}", path.display(), err))
+            .map_err(|err| Error::Io(err))
             .map(|bytes| (bytes, None))
     }
 
