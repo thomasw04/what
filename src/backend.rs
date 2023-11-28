@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use crate::error::Error;
+use crate::{error::Error, Location};
 
 pub trait Backend {
     fn read_file(
-        base: Option<&Path>,
+        base: &Option<Location>,
         path: &str,
     ) -> Result<(Vec<u8>, Option<Vec<(String, Vec<u8>)>>), Error>;
     fn write_file(path: &str, bytes: Vec<u8>, overwrite: bool) -> Result<(), String>;
@@ -52,25 +52,14 @@ impl Backend for What {
 #[cfg(not(target_arch = "wasm32"))]
 impl Backend for crate::What {
     fn read_file(
-        base: Option<&Path>,
+        base: &Option<Location>,
         path: &str,
     ) -> Result<(Vec<u8>, Option<Vec<(String, Vec<u8>)>>), Error> {
-        let path = if let Some(base) = base {
-            base.join(path)
-        } else {
-            PathBuf::from(path)
-        };
-
-        if !path.exists() {
-            return Err(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("File {} not found.", path.display()),
-            )));
+        match base {
+            Some(Location::File(base)) => read_file_impl(&base.join(path)),
+            Some(Location::Http(base)) => todo!("Http fetch not yet implemented."),
+            None => read_file_impl(&PathBuf::from(path)),
         }
-
-        std::fs::read(path)
-            .map_err(|err| Error::Io(err))
-            .map(|bytes| (bytes, None))
     }
 
     fn write_file(path: &str, content: Vec<u8>, overwrite: bool) -> Result<(), String> {
@@ -95,4 +84,17 @@ impl Backend for crate::What {
         std::fs::write(path, content)
             .map_err(|err| format!("Failed to write to file {}. Err: {}", path.display(), err))
     }
+}
+
+fn read_file_impl(path: &PathBuf) -> Result<(Vec<u8>, Option<Vec<(String, Vec<u8>)>>), Error> {
+    if !path.exists() {
+        return Err(Error::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("File {} not found.", path.display()),
+        )));
+    }
+
+    std::fs::read(path)
+        .map_err(Error::Io)
+        .map(|bytes| (bytes, None))
 }

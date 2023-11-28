@@ -269,7 +269,7 @@ pub fn write_texture(
     ))
 }
 
-enum Location {
+pub enum Location {
     File(PathBuf),
     Http(String),
 }
@@ -306,20 +306,20 @@ impl GuidGenerator {
     }
 }
 
-struct What {
+pub struct What {
     guid_generator: GuidGenerator,
     paths: HashMap<String, Guid>,
     cache: LfuCache<Guid, Vec<u8>>,
-    base: Location,
+    location: Option<Location>,
 }
 
 impl What {
-    pub fn new(max_size: usize) -> What {
+    pub fn new(max_size: usize, location: Option<Location>) -> What {
         What {
             guid_generator: GuidGenerator::new(),
             paths: HashMap::new(),
             cache: LfuCache::new(max_size),
-            base: Location::File(PathBuf::from(".")),
+            location,
         }
     }
 
@@ -337,7 +337,7 @@ impl What {
             return Ok(data.clone());
         }
 
-        let (data, other) = <What as Backend>::read_file(None, path)?;
+        let (data, other) = <What as Backend>::read_file(&self.location, path)?;
         self.cache.insert(&key, data.clone(), priority);
 
         if let Some(other) = other {
@@ -350,7 +350,7 @@ impl What {
         Ok(data)
     }
 
-    fn load_asset(&mut self, path: &str, priority: usize) -> Result<Asset, Error> {
+    pub fn load_asset(&mut self, path: &str, priority: usize) -> Result<Asset, Error> {
         let data = self.load_file(path, priority)?;
 
         let mut size_buf = [0u8; 8];
@@ -386,12 +386,12 @@ impl What {
                 }
                 HeaderType::Gltf(gltf_meta) => {
                     let slice = &data[(size as usize + 7 + gltf_meta.offset as usize)..];
-                    let base = match &self.base {
-                        Location::File(path) => Some(path.clone()),
+                    let base = match &self.location {
+                        Some(Location::File(path)) => Some(path.clone()),
                         _ => None,
                     };
 
-                    return gltf::import_slice(slice, base.as_deref(), |base, path| {
+                    return gltf::import_slice(slice, base.as_deref(), |_, path| {
                         let res = self.load_file(path, priority);
 
                         match res {
