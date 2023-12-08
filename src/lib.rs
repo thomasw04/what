@@ -1,11 +1,10 @@
 use backend::Backend;
 use error::Error;
-use gltf::json::extensions::texture;
 use image::EncodableLayout;
 use lfu::LfuCache;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::{Path, PathBuf},
 };
 use utils::{Guid, GuidGenerator};
@@ -81,8 +80,8 @@ pub struct TextureArrayData {
 }
 
 pub enum Asset {
-    Texture((Vec<u8>, (u32, u32))),
-    TextureArray(Vec<(String, Vec<u8>, (u32, u32))>),
+    Texture(TextureData),
+    TextureArray(TextureArrayData),
     Glb(
         gltf::Document,
         Vec<gltf::buffer::Data>,
@@ -155,28 +154,36 @@ impl What {
                 HeaderType::Texture(texture_meta) => {
                     let texture =
                         data[(size as usize + 7 + texture_meta.offset as usize)..].to_vec();
-                    Ok(Asset::Texture((
-                        texture,
-                        (texture_meta.width, texture_meta.height),
-                    )))
+                    Ok(Asset::Texture(TextureData {
+                        width: texture_meta.width,
+                        height: texture_meta.height,
+                        format: texture_meta.format,
+                        data: texture,
+                    }))
                 }
                 HeaderType::Cubemap(cubemap_meta) => {
-                    let mut textures = Vec::<(String, Vec<u8>, (u32, u32))>::new();
+                    let mut textures = Vec::<Vec<u8>>::new();
+                    let mut keys = Vec::<String>::new();
                     for (i, entry) in cubemap_meta.data.iter().enumerate() {
                         let default_end = HeaderEntry {
                             key: "".to_string(),
                             offset: u64::MAX,
                         };
                         let end = cubemap_meta.data.get(i + 1).unwrap_or(&default_end);
-                        textures.push((
-                            entry.key.clone(),
+                        textures.push(
                             data[((size as usize + 7) + entry.offset as usize)
                                 ..end.offset as usize]
                                 .to_vec(),
-                            (cubemap_meta.size, cubemap_meta.size),
-                        ));
+                        );
+
+                        keys.push(entry.key.clone());
                     }
-                    Ok(Asset::TextureArray(textures))
+                    Ok(Asset::TextureArray(TextureArrayData {
+                        size: cubemap_meta.size,
+                        format: cubemap_meta.format,
+                        keys,
+                        data: textures,
+                    }))
                 }
                 HeaderType::Gltf(gltf_meta) => {
                     let slice = &data[(size as usize + 7 + gltf_meta.offset as usize)..];
