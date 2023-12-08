@@ -360,7 +360,8 @@ impl What {
         match serde_json::from_slice::<FurHeader>(&data) {
             Ok(meta) => match meta.ctype {
                 HeaderType::Texture(texture_meta) => {
-                    let texture = self.load_file(path, priority)?;
+                    let texture =
+                        data[(size as usize + 7 + texture_meta.offset as usize)..].to_vec();
                     Ok(Asset::Texture((
                         texture,
                         (texture_meta.width, texture_meta.height),
