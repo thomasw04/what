@@ -57,7 +57,7 @@ impl Backend for crate::What {
     ) -> Result<(Vec<u8>, Option<Vec<(String, Vec<u8>)>>), Error> {
         match base {
             Some(Location::File(base)) => read_file_impl(&base.join(path)),
-            Some(Location::Http(base)) => todo!("Http fetch not yet implemented."),
+            Some(Location::Http(_base)) => todo!("Http fetch not yet implemented."),
             None => read_file_impl(&PathBuf::from(path)),
         }
     }
