@@ -3,7 +3,8 @@ use std::{env, path::Path};
 use clap::{Args, Parser, Subcommand};
 use log::{Level, LevelFilter};
 use simplelog::{Color, ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
-use what::{convert_cubemap, convert_texture};
+
+use what::What;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -61,7 +62,9 @@ fn main() {
                         .clone()
                         .expect("Cannot infer output file name of a cube map. Please provide one.");
 
-                    if let Err(e) = convert_cubemap(Path::new(&output), inputs, args.overwrite) {
+                    if let Err(e) =
+                        What::convert_cubemap(Path::new(&output), &inputs, args.overwrite)
+                    {
                         log::error!("{}", e);
                     } else {
                         log::info!("Successfully created file {}", output);
@@ -85,7 +88,9 @@ fn main() {
                         args.output.clone().unwrap()
                     };
 
-                    if let Err(e) = convert_texture(Path::new(&output), inputs[0], args.overwrite) {
+                    if let Err(e) =
+                        What::convert_texture(Path::new(&output), inputs[0], args.overwrite)
+                    {
                         log::error!("{}", e);
                     } else {
                         log::info!("Successfully created file {}", output);
