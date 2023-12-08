@@ -27,7 +27,7 @@ struct HeaderEntry {
 #[derive(Serialize, Deserialize)]
 enum HeaderType {
     Texture(HeaderTexture),
-    Cubemap(HeaderCubemap),
+    TextureArray(HeaderTextureArray),
     Gltf(HeaderGltf),
 }
 
@@ -40,7 +40,7 @@ struct HeaderTexture {
 }
 
 #[derive(Serialize, Deserialize)]
-struct HeaderCubemap {
+struct HeaderTextureArray {
     size: u32,
     format: Option<String>,
     data: Vec<HeaderEntry>,
@@ -161,15 +161,15 @@ impl What {
                         data: texture,
                     }))
                 }
-                HeaderType::Cubemap(cubemap_meta) => {
+                HeaderType::TextureArray(texarray_meta) => {
                     let mut textures = Vec::<Vec<u8>>::new();
                     let mut keys = Vec::<String>::new();
-                    for (i, entry) in cubemap_meta.data.iter().enumerate() {
+                    for (i, entry) in texarray_meta.data.iter().enumerate() {
                         let default_end = HeaderEntry {
                             key: "".to_string(),
                             offset: u64::MAX,
                         };
-                        let end = cubemap_meta.data.get(i + 1).unwrap_or(&default_end);
+                        let end = texarray_meta.data.get(i + 1).unwrap_or(&default_end);
                         textures.push(
                             data[((size as usize + 7) + entry.offset as usize)
                                 ..end.offset as usize]
@@ -179,8 +179,8 @@ impl What {
                         keys.push(entry.key.clone());
                     }
                     Ok(Asset::TextureArray(TextureArrayData {
-                        size: cubemap_meta.size,
-                        format: cubemap_meta.format,
+                        size: texarray_meta.size,
+                        format: texarray_meta.format,
                         keys,
                         data: textures,
                     }))
@@ -294,7 +294,7 @@ impl What {
         let header = FurHeader {
             major: VERSION_MAJOR,
             minor: VERSION_MINOR,
-            ctype: HeaderType::Cubemap(HeaderCubemap {
+            ctype: HeaderType::TextureArray(HeaderTextureArray {
                 size: textures.size,
                 format: textures.format.as_ref().map(String::from),
                 data: entries,
