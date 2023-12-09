@@ -223,7 +223,13 @@ impl What {
         }
     }
 
-    fn write_texture(output: &Path, texture: &TextureData, overwrite: bool) -> Result<(), String> {
+    fn write_texture<P: AsRef<Path>>(
+        output: P,
+        texture: &TextureData,
+        overwrite: bool,
+    ) -> Result<(), String> {
+        let output = output.as_ref();
+
         if output.exists() {
             if overwrite {
                 log::warn!("Overwrite flag set. Overwriting file {}", output.display());
@@ -275,11 +281,13 @@ impl What {
         ))
     }
 
-    fn write_texture_array(
-        output: &Path,
+    fn write_texture_array<P: AsRef<Path>>(
+        output: P,
         textures: &TextureArrayData,
         overwrite: bool,
     ) -> Result<(), String> {
+        let output = output.as_ref();
+
         if output.exists() {
             if overwrite {
                 log::warn!("Overwrite flag set. Overwriting file {}", output.display());
@@ -382,19 +390,21 @@ impl What {
         Err(format!("File {} does not exist.", input.display()))
     }
 
-    pub fn convert_texture_array(
-        output: &Path,
-        keys: &Option<Vec<impl Into<String> + Clone>>,
-        inputs: &Vec<&Path>,
+    pub fn convert_texture_array<P: AsRef<Path>, S: Into<String> + Clone>(
+        output: P,
+        keys: Option<&[S]>,
+        inputs: &[P],
         overwrite: bool,
     ) -> Result<(), String> {
-        let mut textures = Vec::<Vec<u8>>::with_capacity(inputs.len());
-
-        let keys = keys.as_ref().map(|a| {
+        let output = output.as_ref();
+        let inputs = inputs.iter().map(|a| a.as_ref()).collect::<Vec<&Path>>();
+        let keys = keys.map(|a| {
             a.iter()
                 .map(|b| (*b).clone().into())
                 .collect::<Vec<String>>()
         });
+
+        let mut textures = Vec::<Vec<u8>>::with_capacity(inputs.len());
 
         let keys = keys.unwrap_or_else(|| {
             inputs
@@ -464,12 +474,12 @@ impl What {
         What::write_texture_array(output, &textures, overwrite)
     }
 
-    pub fn convert_cubemap(
-        output: &Path,
-        inputs: &Vec<&Path>,
+    pub fn convert_cubemap<P: AsRef<Path>>(
+        output: P,
+        inputs: &[P],
         overwrite: bool,
     ) -> Result<(), String> {
         let keys = vec!["-x", "+x", "-y", "+y", "-z", "+z"];
-        What::convert_texture_array(output, &Some(keys), inputs, overwrite)
+        What::convert_texture_array(output, Some(&keys), inputs, overwrite)
     }
 }
