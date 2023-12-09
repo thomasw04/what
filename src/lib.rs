@@ -145,15 +145,18 @@ impl What {
     pub fn load_asset(&mut self, path: &str, priority: usize) -> Result<Asset, Error> {
         let data = self.load_file(path, priority)?;
 
-        let mut size_buf = [0u8; 8];
-        size_buf[..8].copy_from_slice(&data[..8]);
+        const HEADER_BEGIN: usize = 8;
+
+        let mut size_buf = [0u8; HEADER_BEGIN];
+        size_buf[..HEADER_BEGIN].copy_from_slice(&data[..HEADER_BEGIN]);
         let size = u64::from_be_bytes(size_buf);
 
-        match serde_json::from_slice::<FurHeader>(&data) {
+        let HEADER_END = HEADER_BEGIN + size as usize;
+
+        match serde_json::from_slice::<FurHeader>(&data[HEADER_BEGIN..HEADER_END]) {
             Ok(meta) => match meta.ctype {
                 HeaderType::Texture(texture_meta) => {
-                    let texture =
-                        data[(size as usize + 7 + texture_meta.offset as usize)..].to_vec();
+                    let texture = data[(HEADER_END + texture_meta.offset as usize)..].to_vec();
                     Ok(Asset::Texture(TextureData {
                         width: texture_meta.width,
                         height: texture_meta.height,
@@ -171,8 +174,7 @@ impl What {
                         };
                         let end = texarray_meta.data.get(i + 1).unwrap_or(&default_end);
                         textures.push(
-                            data[((size as usize + 7) + entry.offset as usize)
-                                ..end.offset as usize]
+                            data[(HEADER_END + entry.offset as usize)..end.offset as usize]
                                 .to_vec(),
                         );
 
@@ -186,7 +188,7 @@ impl What {
                     }))
                 }
                 HeaderType::Gltf(gltf_meta) => {
-                    let slice = &data[(size as usize + 7 + gltf_meta.offset as usize)..];
+                    let slice = &data[(HEADER_END + gltf_meta.offset as usize)..];
                     let base = match &self.location {
                         Some(Location::File(path)) => Some(path.clone()),
                         _ => None,
@@ -274,9 +276,7 @@ impl What {
         }
 
         if textures.keys.len() != textures.data.len() {
-            return Err(format!(
-                "Texture array keys and data must have the same length."
-            ));
+            return Err("Texture array keys and data must have the same length.".to_string());
         }
 
         let mut entries = Vec::<HeaderEntry>::new();
@@ -336,7 +336,14 @@ impl What {
         ))
     }
 
-    pub fn convert_texture(output: &Path, input: &Path, overwrite: bool) -> Result<(), String> {
+    pub fn convert_texture<P: AsRef<Path>>(
+        output: P,
+        input: P,
+        overwrite: bool,
+    ) -> Result<(), String> {
+        let output = output.as_ref();
+        let input = input.as_ref();
+
         if input.exists() {
             if let Ok(dimension) = image::image_dimensions(input) {
                 if let Ok(texture) = std::fs::read(input) {
@@ -436,7 +443,7 @@ impl What {
 
         let textures = TextureArrayData {
             size,
-            format: format,
+            format,
             keys,
             data: textures,
         };

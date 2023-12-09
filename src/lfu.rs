@@ -63,7 +63,7 @@ impl<Key: Hash + Eq + Clone, Item: ItemSize> LfuCache<Key, Item> {
     pub fn insert(&mut self, key: &Key, value: Item, priority: usize) {
         let size = value.size() + std::mem::size_of::<CacheEntry<Key>>();
 
-        if size > self.size_in_bytes {
+        if size > self.max_size_in_bytes {
             panic!("Item is too large to fit in cache");
         }
         self.size_in_bytes += size;
