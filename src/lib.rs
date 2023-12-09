@@ -119,18 +119,30 @@ impl What {
         self.cache.shrink_to_fit(max_size);
     }
 
-    pub fn load_file(&mut self, path: &str, priority: usize) -> Result<Vec<u8>, Error> {
-        let key = *self
-            .paths
-            .entry(path.to_string())
-            .or_insert_with(|| self.guid_generator.generate());
+    pub fn load_file<S: AsRef<str>>(&mut self, path: S, priority: usize) -> Result<Vec<u8>, Error> {
+        let path = path.as_ref();
 
-        if let Some(data) = self.cache.get(&key) {
+        let key = if let Some(guid) = self.paths.get(path) {
+            guid
+        } else {
+            self.paths
+                .insert(path.to_string(), self.guid_generator.generate());
+
+            if let Some(guid) = self.paths.get(path) {
+                guid
+            } else {
+                return Err(Error::Unknown(
+                    "I don't know what happened. Unable to generate Guid.".to_string(),
+                ));
+            }
+        };
+
+        if let Some(data) = self.cache.get(key) {
             return Ok(data.clone());
         }
 
         let (data, other) = <What as Backend>::read_file(&self.location, path)?;
-        self.cache.insert(&key, data.clone(), priority);
+        self.cache.insert(key, data.clone(), priority);
 
         if let Some(other) = other {
             for (key, data) in other {
@@ -142,7 +154,8 @@ impl What {
         Ok(data)
     }
 
-    pub fn load_asset(&mut self, path: &str, priority: usize) -> Result<Asset, Error> {
+    pub fn load_asset<S: AsRef<str>>(&mut self, path: S, priority: usize) -> Result<Asset, Error> {
+        let path = path.as_ref();
         let data = self.load_file(path, priority)?;
 
         const HEADER_BEGIN: usize = 8;
@@ -151,12 +164,12 @@ impl What {
         size_buf[..HEADER_BEGIN].copy_from_slice(&data[..HEADER_BEGIN]);
         let size = u64::from_be_bytes(size_buf);
 
-        let HEADER_END = HEADER_BEGIN + size as usize;
+        let header_end = HEADER_BEGIN + size as usize;
 
-        match serde_json::from_slice::<FurHeader>(&data[HEADER_BEGIN..HEADER_END]) {
+        match serde_json::from_slice::<FurHeader>(&data[HEADER_BEGIN..header_end]) {
             Ok(meta) => match meta.ctype {
                 HeaderType::Texture(texture_meta) => {
-                    let texture = data[(HEADER_END + texture_meta.offset as usize)..].to_vec();
+                    let texture = data[(header_end + texture_meta.offset as usize)..].to_vec();
                     Ok(Asset::Texture(TextureData {
                         width: texture_meta.width,
                         height: texture_meta.height,
@@ -174,7 +187,7 @@ impl What {
                         };
                         let end = texarray_meta.data.get(i + 1).unwrap_or(&default_end);
                         textures.push(
-                            data[(HEADER_END + entry.offset as usize)..end.offset as usize]
+                            data[(header_end + entry.offset as usize)..end.offset as usize]
                                 .to_vec(),
                         );
 
@@ -188,7 +201,7 @@ impl What {
                     }))
                 }
                 HeaderType::Gltf(gltf_meta) => {
-                    let slice = &data[(HEADER_END + gltf_meta.offset as usize)..];
+                    let slice = &data[(header_end + gltf_meta.offset as usize)..];
                     let base = match &self.location {
                         Some(Location::File(path)) => Some(path.clone()),
                         _ => None,

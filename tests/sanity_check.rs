@@ -56,6 +56,8 @@ fn test_convert_asset() {
 
     if let Asset::Texture(data) = actual {
         assert_eq!(expected, data.data.as_slice());
+        assert_eq!(data.width, 512);
+        assert_eq!(data.height, 512);
     } else {
         panic!("Expected texture.");
     }

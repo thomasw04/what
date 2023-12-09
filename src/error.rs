@@ -4,6 +4,7 @@ pub enum Error {
     Io(std::io::Error),
     GltfError(gltf::Error),
     JsonError(serde_json::Error),
+    Unknown(String),
 }
 
 impl Debug for Error {
@@ -12,6 +13,7 @@ impl Debug for Error {
             Error::Io(err) => write!(f, "Io error: {}", err),
             Error::GltfError(err) => write!(f, "Gltf error: {}", err),
             Error::JsonError(err) => write!(f, "Json error: {}", err),
+            Error::Unknown(err) => write!(f, "Unknown error: {}", err),
         }
     }
 }
