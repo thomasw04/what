@@ -224,11 +224,18 @@ impl What {
     }
 
     fn write_texture<P: AsRef<Path>>(
+        &self,
         output: P,
         texture: &TextureData,
         overwrite: bool,
     ) -> Result<(), String> {
         let output = output.as_ref();
+
+        let output = if let Some(Location::File(path)) = &self.location {
+            path.join(output)
+        } else {
+            output.to_path_buf()
+        };
 
         if output.exists() {
             if overwrite {
@@ -282,11 +289,18 @@ impl What {
     }
 
     fn write_texture_array<P: AsRef<Path>>(
+        &self,
         output: P,
         textures: &TextureArrayData,
         overwrite: bool,
     ) -> Result<(), String> {
         let output = output.as_ref();
+
+        let output = if let Some(Location::File(path)) = &self.location {
+            path.join(output)
+        } else {
+            output.to_path_buf()
+        };
 
         if output.exists() {
             if overwrite {
@@ -358,12 +372,21 @@ impl What {
     }
 
     pub fn convert_texture<P: AsRef<Path>>(
+        &self,
         output: P,
         input: P,
         overwrite: bool,
     ) -> Result<(), String> {
         let output = output.as_ref();
         let input = input.as_ref();
+
+        let input = if let Some(Location::File(path)) = &self.location {
+            path.join(input)
+        } else {
+            input.to_path_buf()
+        };
+
+        let input = input.as_path();
 
         if input.exists() {
             if let Ok(dimension) = image::image_dimensions(input) {
@@ -377,7 +400,7 @@ impl What {
                         data: texture,
                     };
 
-                    return What::write_texture(output, &texture, overwrite);
+                    return self.write_texture(output, &texture, overwrite);
                 }
                 return Err(format!("Failed to read file: {}", input.display()));
             }
@@ -391,6 +414,7 @@ impl What {
     }
 
     pub fn convert_texture_array<P: AsRef<Path>, S: Into<String> + Clone>(
+        &self,
         output: P,
         keys: Option<&[S]>,
         inputs: &[P],
@@ -471,15 +495,16 @@ impl What {
             data: textures,
         };
 
-        What::write_texture_array(output, &textures, overwrite)
+        self.write_texture_array(output, &textures, overwrite)
     }
 
     pub fn convert_cubemap<P: AsRef<Path>>(
+        &self,
         output: P,
         inputs: &[P],
         overwrite: bool,
     ) -> Result<(), String> {
         let keys = vec!["-x", "+x", "-y", "+y", "-z", "+z"];
-        What::convert_texture_array(output, Some(&keys), inputs, overwrite)
+        self.convert_texture_array(output, Some(&keys), inputs, overwrite)
     }
 }

@@ -51,6 +51,8 @@ fn main() {
         env::current_dir().unwrap().display()
     );
 
+    let what = What::new(1e8 as usize, None);
+
     match &cli.command {
         Commands::Convert(args) => {
             let inputs = args.input.iter().map(Path::new).collect::<Vec<&Path>>();
@@ -63,7 +65,7 @@ fn main() {
                         .expect("Cannot infer output file name of a cube map. Please provide one.");
 
                     if let Err(e) =
-                        What::convert_cubemap(Path::new(&output), &inputs, args.overwrite)
+                        what.convert_cubemap(Path::new(&output), &inputs, args.overwrite)
                     {
                         log::error!("{}", e);
                     } else {
@@ -89,7 +91,7 @@ fn main() {
                     };
 
                     if let Err(e) =
-                        What::convert_texture(Path::new(&output), inputs[0], args.overwrite)
+                        what.convert_texture(Path::new(&output), inputs[0], args.overwrite)
                     {
                         log::error!("{}", e);
                     } else {

@@ -49,7 +49,8 @@ fn test_convert_asset() {
         Some(what::Location::File(PathBuf::from("tests/assets"))),
     );
 
-    What::convert_texture("tests/assets/error_gen.fur", "tests/assets/error.png", true).unwrap();
+    what.convert_texture("error_gen.fur", "error.png", true)
+        .unwrap();
 
     let actual = what.load_asset("error_gen.fur", 0).unwrap();
     let expected = include_bytes!("assets/error.png");
