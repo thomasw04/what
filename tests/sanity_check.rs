@@ -63,3 +63,40 @@ fn test_convert_asset() {
         panic!("Expected texture.");
     }
 }
+
+#[test]
+fn test_convert_cubemap() {
+    let mut what = What::new(
+        1e8 as usize,
+        Some(what::Location::File(PathBuf::from("tests/assets"))),
+    );
+
+    what.convert_cubemap(
+        "cubemap_gen.fur",
+        &[
+            "error.png",
+            "error.png",
+            "error.png",
+            "error.png",
+            "error.png",
+            "error.png",
+        ],
+        true,
+    )
+    .unwrap();
+
+    let actual = what.load_asset("cubemap_gen.fur", 0).unwrap();
+
+    let expected = include_bytes!("assets/error.png");
+
+    if let Asset::TextureArray(data) = actual {
+        assert_eq!(data.size, 512);
+        assert_eq!(data.data.len(), 6);
+        for face in data.data {
+            assert_eq!(face.len(), expected.len());
+            assert_eq!(face.as_slice(), expected);
+        }
+    } else {
+        panic!("Expected cubemap.");
+    }
+}

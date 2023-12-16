@@ -181,15 +181,14 @@ impl What {
                     let mut textures = Vec::<Vec<u8>>::new();
                     let mut keys = Vec::<String>::new();
                     for (i, entry) in texarray_meta.data.iter().enumerate() {
-                        let default_end = HeaderEntry {
-                            key: "".to_string(),
-                            offset: data.len() as u64,
+                        let end_offset = if i + 1 >= texarray_meta.data.len() {
+                            data.len()
+                        } else {
+                            header_end + texarray_meta.data[i + 1].offset as usize
                         };
-                        let end = texarray_meta.data.get(i + 1).unwrap_or(&default_end);
-                        textures.push(
-                            data[(header_end + entry.offset as usize)..end.offset as usize]
-                                .to_vec(),
-                        );
+
+                        textures
+                            .push(data[(header_end + entry.offset as usize)..end_offset].to_vec());
 
                         keys.push(entry.key.clone());
                     }
@@ -311,7 +310,11 @@ impl What {
         }
 
         if textures.keys.len() != textures.data.len() {
-            return Err("Texture array keys and data must have the same length.".to_string());
+            return Err(format!(
+                "Texture array keys and data must have the same length. Keys: {} Textures: {}",
+                textures.keys.len(),
+                textures.data.len()
+            ));
         }
 
         let mut entries = Vec::<HeaderEntry>::new();
@@ -421,7 +424,16 @@ impl What {
         overwrite: bool,
     ) -> Result<(), String> {
         let output = output.as_ref();
-        let inputs = inputs.iter().map(|a| a.as_ref()).collect::<Vec<&Path>>();
+        let inputs = inputs
+            .iter()
+            .map(|a| {
+                if let Some(Location::File(path)) = &self.location {
+                    path.join(a)
+                } else {
+                    a.as_ref().to_path_buf()
+                }
+            })
+            .collect::<Vec<PathBuf>>();
         let keys = keys.map(|a| {
             a.iter()
                 .map(|b| (*b).clone().into())
@@ -445,7 +457,7 @@ impl What {
         let mut size = 0;
         let mut format = None;
 
-        for input in inputs {
+        for input in &inputs {
             if input.exists() {
                 if let Ok(dimension) = image::image_dimensions(input) {
                     if dimension.0 != dimension.1 {
@@ -481,11 +493,9 @@ impl What {
                         input.display()
                     ));
                 }
+            } else {
+                return Err(format!("File {} does not exist.", input.display()));
             }
-        }
-
-        if size == 0 {
-            return Err("Invalid texture count.".to_string());
         }
 
         let textures = TextureArrayData {
