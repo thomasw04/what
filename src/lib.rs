@@ -183,7 +183,7 @@ impl What {
                     for (i, entry) in texarray_meta.data.iter().enumerate() {
                         let default_end = HeaderEntry {
                             key: "".to_string(),
-                            offset: u64::MAX,
+                            offset: data.len() as u64,
                         };
                         let end = texarray_meta.data.get(i + 1).unwrap_or(&default_end);
                         textures.push(
@@ -504,7 +504,7 @@ impl What {
         inputs: &[P],
         overwrite: bool,
     ) -> Result<(), String> {
-        let keys = vec!["-x", "+x", "-y", "+y", "-z", "+z"];
+        let keys = vec!["+x", "-x", "+y", "-y", "+z", "-z"];
         self.convert_texture_array(output, Some(&keys), inputs, overwrite)
     }
 }
