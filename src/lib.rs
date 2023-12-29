@@ -1,10 +1,12 @@
 use backend::Backend;
+use byteorder::{BigEndian, ReadBytesExt};
 use error::Error;
-use image::EncodableLayout;
 use lfu::LfuCache;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    io::Cursor,
+    os::raw,
     path::{Path, PathBuf},
 };
 use utils::{Guid, GuidGenerator};
@@ -28,6 +30,7 @@ struct HeaderEntry {
 enum HeaderType {
     Texture(HeaderTexture),
     TextureArray(HeaderTextureArray),
+    Shader(HeaderShader),
     Gltf(HeaderGltf),
 }
 
@@ -52,7 +55,12 @@ struct HeaderGltf {
 }
 
 #[derive(Serialize, Deserialize)]
-struct FurHeader {
+struct HeaderShader {
+    offset: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct BaseHeader {
     major: u16,
     minor: u16,
     ctype: HeaderType,
@@ -64,6 +72,10 @@ struct FurHeader {
 
 const VERSION_MAJOR: u16 = 1;
 const VERSION_MINOR: u16 = 0;
+
+pub struct ShaderData {
+    pub data: Vec<u32>,
+}
 
 pub struct TextureData {
     pub width: u32,
@@ -82,7 +94,8 @@ pub struct TextureArrayData {
 pub enum Asset {
     Texture(TextureData),
     TextureArray(TextureArrayData),
-    Glb(
+    Shader(ShaderData),
+    Gltf(
         gltf::Document,
         Vec<gltf::buffer::Data>,
         Vec<gltf::image::Data>,
@@ -162,11 +175,11 @@ impl What {
 
         let mut size_buf = [0u8; HEADER_BEGIN];
         size_buf[..HEADER_BEGIN].copy_from_slice(&data[..HEADER_BEGIN]);
-        let size = u64::from_be_bytes(size_buf);
+        let size = u64::from_le_bytes(size_buf);
 
         let header_end = HEADER_BEGIN + size as usize;
 
-        match serde_json::from_slice::<FurHeader>(&data[HEADER_BEGIN..header_end]) {
+        match serde_json::from_slice::<BaseHeader>(&data[HEADER_BEGIN..header_end]) {
             Ok(meta) => match meta.ctype {
                 HeaderType::Texture(texture_meta) => {
                     let texture = data[(header_end + texture_meta.offset as usize)..].to_vec();
@@ -199,6 +212,17 @@ impl What {
                         data: textures,
                     }))
                 }
+                HeaderType::Shader(shader_meta) => {
+                    let shader = data[(header_end + shader_meta.offset as usize)..].to_vec();
+                    let mut read = Cursor::new(shader);
+                    let mut shader = Vec::<u32>::new();
+
+                    while let Ok(value) = read.read_u32::<byteorder::LittleEndian>() {
+                        shader.push(value);
+                    }
+
+                    Ok(Asset::Shader(ShaderData { data: shader }))
+                }
                 HeaderType::Gltf(gltf_meta) => {
                     let slice = &data[(header_end + gltf_meta.offset as usize)..];
                     let base = match &self.location {
@@ -215,17 +239,18 @@ impl What {
                         }
                     })
                     .map_err(Error::GltfError)
-                    .map(|(document, buffers, images)| Asset::Glb(document, buffers, images));
+                    .map(|(document, buffers, images)| Asset::Gltf(document, buffers, images));
                 }
             },
             Err(err) => Err(Error::JsonError(err)),
         }
     }
 
-    fn write_texture<P: AsRef<Path>>(
+    fn write_asset<P: AsRef<Path>, S: AsRef<str>>(
         &self,
         output: P,
-        texture: &TextureData,
+        header: S,
+        content: &[u8],
         overwrite: bool,
     ) -> Result<(), String> {
         let output = output.as_ref();
@@ -243,17 +268,6 @@ impl What {
                 return Err(format!("File {} already exists.", output.display()));
             }
         }
-
-        let header = FurHeader {
-            major: VERSION_MAJOR,
-            minor: VERSION_MINOR,
-            ctype: HeaderType::Texture(HeaderTexture {
-                width: texture.width,
-                height: texture.height,
-                format: texture.format.as_ref().map(String::from),
-                offset: 0,
-            }),
-        };
 
         if output.parent().is_none() {
             return Err(format!("{} has no parent folder.", output.display()));
@@ -267,24 +281,40 @@ impl What {
             ));
         }
 
-        if let Ok(content) = serde_json::to_string(&header) {
-            let size: u64 = content.as_bytes().len() as u64;
-            return std::fs::write(
-                output,
-                [
-                    &size.to_be_bytes(),
-                    content.as_bytes(),
-                    texture.data.as_bytes(),
-                ]
-                .concat(),
-            )
-            .map_err(|error| error.to_string());
-        }
+        let size: u64 = header.as_ref().as_bytes().len() as u64;
 
-        Err(format!(
-            "Could not serialize header of {}.",
-            output.display()
-        ))
+        return std::fs::write(
+            output,
+            [&size.to_le_bytes(), header.as_ref().as_bytes(), content].concat(),
+        )
+        .map_err(|error| error.to_string());
+    }
+
+    fn write_texture<P: AsRef<Path>>(
+        &self,
+        output: P,
+        texture: &TextureData,
+        overwrite: bool,
+    ) -> Result<(), String> {
+        let header = BaseHeader {
+            major: VERSION_MAJOR,
+            minor: VERSION_MINOR,
+            ctype: HeaderType::Texture(HeaderTexture {
+                width: texture.width,
+                height: texture.height,
+                format: texture.format.as_ref().map(String::from),
+                offset: 0,
+            }),
+        };
+
+        match serde_json::to_string(&header) {
+            Ok(header) => self.write_asset(output, header, texture.data.as_slice(), overwrite),
+            Err(err) => Err(format!(
+                "Could not serialize header of {}. Error: {}",
+                output.as_ref().display(),
+                err
+            )),
+        }
     }
 
     fn write_texture_array<P: AsRef<Path>>(
@@ -293,22 +323,6 @@ impl What {
         textures: &TextureArrayData,
         overwrite: bool,
     ) -> Result<(), String> {
-        let output = output.as_ref();
-
-        let output = if let Some(Location::File(path)) = &self.location {
-            path.join(output)
-        } else {
-            output.to_path_buf()
-        };
-
-        if output.exists() {
-            if overwrite {
-                log::warn!("Overwrite flag set. Overwriting file {}", output.display());
-            } else {
-                return Err(format!("File {} already exists.", output.display()));
-            }
-        }
-
         if textures.keys.len() != textures.data.len() {
             return Err(format!(
                 "Texture array keys and data must have the same length. Keys: {} Textures: {}",
@@ -329,7 +343,7 @@ impl What {
             offset += textures.data[i].len() as u64;
         }
 
-        let header = FurHeader {
+        let header = BaseHeader {
             major: VERSION_MAJOR,
             minor: VERSION_MINOR,
             ctype: HeaderType::TextureArray(HeaderTextureArray {
@@ -339,18 +353,6 @@ impl What {
             }),
         };
 
-        if output.parent().is_none() {
-            return Err(format!("{} has no parent folder.", output.display()));
-        }
-
-        if let Err(e) = std::fs::create_dir_all(output.parent().unwrap()) {
-            return Err(format!(
-                "Could not create parent folders of {}. Message: {}",
-                output.display(),
-                e
-            ));
-        }
-
         //Gather all the data.
         let content = textures
             .data
@@ -359,19 +361,42 @@ impl What {
             .cloned()
             .collect::<Vec<u8>>();
 
-        if let Ok(header) = serde_json::to_string(&header) {
-            let size: u64 = header.as_bytes().len() as u64;
-            return std::fs::write(
-                output,
-                [&size.to_be_bytes(), header.as_bytes(), content.as_bytes()].concat(),
-            )
-            .map_err(|error| error.to_string());
+        match serde_json::to_string(&header) {
+            Ok(header) => self.write_asset(output, header, content.as_slice(), overwrite),
+            Err(err) => Err(format!(
+                "Could not serialize header of {}. Error: {}",
+                output.as_ref().display(),
+                err
+            )),
+        }
+    }
+
+    pub fn write_shader<P: AsRef<Path>>(
+        &self,
+        output: P,
+        shader: &ShaderData,
+        overwrite: bool,
+    ) -> Result<(), String> {
+        let header = BaseHeader {
+            major: VERSION_MAJOR,
+            minor: VERSION_MINOR,
+            ctype: HeaderType::Shader(HeaderShader { offset: 0 }),
+        };
+
+        let mut raw_shader = Vec::new();
+
+        for value in &shader.data {
+            raw_shader.extend_from_slice(&value.to_le_bytes());
         }
 
-        Err(format!(
-            "Could not serialize header of {}.",
-            output.display()
-        ))
+        match serde_json::to_string(&header) {
+            Ok(header) => self.write_asset(output, header, &raw_shader, overwrite),
+            Err(err) => Err(format!(
+                "Could not serialize header of {}. Error: {}",
+                output.as_ref().display(),
+                err
+            )),
+        }
     }
 
     pub fn convert_texture<P: AsRef<Path>>(
@@ -516,5 +541,55 @@ impl What {
     ) -> Result<(), String> {
         let keys = vec!["+x", "-x", "+y", "-y", "+z", "-z"];
         self.convert_texture_array(output, Some(&keys), inputs, overwrite)
+    }
+
+    pub fn convert_shader<P: AsRef<Path>>(
+        &self,
+        output: P,
+        input: P,
+        overwrite: bool,
+    ) -> Result<(), String> {
+        let input = input.as_ref();
+
+        let input = if let Some(Location::File(path)) = &self.location {
+            path.join(input)
+        } else {
+            input.to_path_buf()
+        };
+
+        let input = input.as_path();
+
+        if let Ok(shader) = std::fs::read(input) {
+            let module = if input
+                .extension()
+                .unwrap_or(std::ffi::OsStr::new(""))
+                .to_string_lossy()
+                == "wgsl"
+            {
+                naga::front::wgsl::parse_str(&String::from_utf8(shader).unwrap()).unwrap()
+            } else {
+                todo!("Support glsl shaders.")
+            };
+            let mut info = naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::all(),
+            );
+
+            if let Ok(info) = info.validate(&module) {
+                let spirv = naga::back::spv::write_vec(
+                    &module,
+                    &info,
+                    &naga::back::spv::Options::default(),
+                    None,
+                )
+                .unwrap();
+
+                self.write_shader(output, &ShaderData { data: spirv }, overwrite)
+            } else {
+                Err(format!("Failed to validate shader: {}", input.display()))
+            }
+        } else {
+            Err(format!("Failed to read file: {}", input.display()))
+        }
     }
 }

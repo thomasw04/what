@@ -100,3 +100,36 @@ fn test_convert_cubemap() {
         panic!("Expected cubemap.");
     }
 }
+
+#[test]
+fn test_convert_shader() {
+    let mut what = What::new(
+        1e8 as usize,
+        Some(what::Location::File(PathBuf::from("tests/assets"))),
+    );
+
+    what.convert_shader("shader_gen.fur", "shader.wgsl", true)
+        .unwrap();
+
+    let actual = what.load_asset("shader_gen.fur", 0).unwrap();
+
+    let actual = if let Asset::Shader(data) = actual {
+        data
+    } else {
+        panic!("Expected shader.");
+    };
+
+    let mut info = naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::all(),
+    );
+
+    let module = naga::front::spv::Frontend::new(
+        actual.data.into_iter(),
+        &naga::front::spv::Options::default(),
+    )
+    .parse()
+    .unwrap();
+
+    info.validate(&module).unwrap();
+}

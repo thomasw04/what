@@ -16,11 +16,13 @@ path = "src/lib.rs"
 
 [dependencies]
 base64 = "0.21.5"
+byteorder = "1.5.0"
 clap = { version = "4.4.3", features = ["derive"] }
 gltf = { git = "https://github.com/thomasw04/gltf", features = ["base64", "image", "names", "urlencoding", "utils"] }
 image = "0.24.7"
 log = "0.4.20"
 lru = "0.12.1"
+naga = { version = "0.14.2", features = ["glsl-in", "wgsl-in", "spv-in", "spv-out"]}
 rand = "0.8.5"
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.107"
