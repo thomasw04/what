@@ -90,12 +90,29 @@ fn main() {
                         args.output.clone().unwrap()
                     };
 
-                    if let Err(e) =
-                        what.convert_texture(Path::new(&output), inputs[0], args.overwrite)
-                    {
-                        log::error!("{}", e);
-                    } else {
-                        log::info!("Successfully created file {}", output);
+                    match inputs[0].extension() {
+                        Some(ext) => {
+                            if ext == "wgsl" {
+                                if let Err(e) = what.convert_shader(
+                                    Path::new(&output),
+                                    inputs[0],
+                                    args.overwrite,
+                                ) {
+                                    log::error!("{}", e);
+                                } else {
+                                    log::info!("Successfully created file {}", output);
+                                }
+                            } else if let Err(e) =
+                                what.convert_texture(Path::new(&output), inputs[0], args.overwrite)
+                            {
+                                log::error!("{}", e);
+                            } else {
+                                log::info!("Successfully created file {}", output);
+                            }
+                        }
+                        None => {
+                            log::error!("Cannot infer input file extension.");
+                        }
                     }
                 }
                 std::cmp::Ordering::Greater => {
