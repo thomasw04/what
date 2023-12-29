@@ -1,12 +1,11 @@
 use backend::Backend;
-use byteorder::{BigEndian, ReadBytesExt};
+use byteorder::ReadBytesExt;
 use error::Error;
 use lfu::LfuCache;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     io::Cursor,
-    os::raw,
     path::{Path, PathBuf},
 };
 use utils::{Guid, GuidGenerator};
@@ -57,6 +56,7 @@ struct HeaderGltf {
 #[derive(Serialize, Deserialize)]
 struct HeaderShader {
     offset: u64,
+    stages: ShaderStages,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -73,8 +73,18 @@ struct BaseHeader {
 const VERSION_MAJOR: u16 = 1;
 const VERSION_MINOR: u16 = 0;
 
+bitflags::bitflags! {
+    #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug)]
+    pub struct ShaderStages: u8 {
+        const VERTEX = 0b00000001;
+        const FRAGMENT = 0b00000010;
+        const COMPUTE = 0b00000100;
+    }
+}
+
 pub struct ShaderData {
     pub data: Vec<u32>,
+    pub stages: ShaderStages,
 }
 
 pub struct TextureData {
@@ -221,7 +231,10 @@ impl What {
                         shader.push(value);
                     }
 
-                    Ok(Asset::Shader(ShaderData { data: shader }))
+                    Ok(Asset::Shader(ShaderData {
+                        data: shader,
+                        stages: shader_meta.stages,
+                    }))
                 }
                 HeaderType::Gltf(gltf_meta) => {
                     let slice = &data[(header_end + gltf_meta.offset as usize)..];
@@ -380,7 +393,10 @@ impl What {
         let header = BaseHeader {
             major: VERSION_MAJOR,
             minor: VERSION_MINOR,
-            ctype: HeaderType::Shader(HeaderShader { offset: 0 }),
+            ctype: HeaderType::Shader(HeaderShader {
+                offset: 0,
+                stages: shader.stages,
+            }),
         };
 
         let mut raw_shader = Vec::new();
@@ -566,10 +582,22 @@ impl What {
                 .to_string_lossy()
                 == "wgsl"
             {
-                naga::front::wgsl::parse_str(&String::from_utf8(shader).unwrap()).unwrap()
+                naga::front::wgsl::parse_str(&String::from_utf8(shader.clone()).unwrap()).unwrap()
             } else {
                 todo!("Support glsl shaders.")
             };
+
+            let stages = if input
+                .extension()
+                .unwrap_or(std::ffi::OsStr::new(""))
+                .to_string_lossy()
+                == "wgsl"
+            {
+                Self::detect_wgsl_stages(shader)?
+            } else {
+                todo!("Support glsl shaders.")
+            };
+
             let mut info = naga::valid::Validator::new(
                 naga::valid::ValidationFlags::all(),
                 naga::valid::Capabilities::all(),
@@ -584,12 +612,41 @@ impl What {
                 )
                 .unwrap();
 
-                self.write_shader(output, &ShaderData { data: spirv }, overwrite)
+                self.write_shader(
+                    output,
+                    &ShaderData {
+                        data: spirv,
+                        stages,
+                    },
+                    overwrite,
+                )
             } else {
                 Err(format!("Failed to validate shader: {}", input.display()))
             }
         } else {
             Err(format!("Failed to read file: {}", input.display()))
+        }
+    }
+
+    fn detect_wgsl_stages(data: Vec<u8>) -> Result<ShaderStages, String> {
+        if let Ok(data) = String::from_utf8(data) {
+            let mut stages = ShaderStages::empty();
+
+            if data.contains("@vertex") {
+                stages.insert(ShaderStages::VERTEX);
+            }
+
+            if data.contains("@fragment") {
+                stages.insert(ShaderStages::FRAGMENT);
+            }
+
+            if data.contains("@compute") {
+                stages.insert(ShaderStages::COMPUTE);
+            }
+
+            Ok(stages)
+        } else {
+            Err("Could not determine shader stages. Did you provide an WGSL shader?".to_string())
         }
     }
 }

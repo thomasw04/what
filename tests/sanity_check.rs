@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use what::{Asset, What};
+use what::{Asset, ShaderStages, What};
 
 #[test]
 fn test_read_file_no_base() {
@@ -132,4 +132,6 @@ fn test_convert_shader() {
     .unwrap();
 
     info.validate(&module).unwrap();
+
+    assert_eq!(actual.stages, ShaderStages::VERTEX | ShaderStages::FRAGMENT);
 }

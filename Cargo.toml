@@ -16,6 +16,7 @@ path = "src/lib.rs"
 
 [dependencies]
 base64 = "0.21.5"
+bitflags = { version = "2.4.1", features = ["serde"] }
 byteorder = "1.5.0"
 clap = { version = "4.4.3", features = ["derive"] }
 gltf = { git = "https://github.com/thomasw04/gltf", features = ["base64", "image", "names", "urlencoding", "utils"] }
