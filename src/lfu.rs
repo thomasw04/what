@@ -100,8 +100,8 @@ impl<Key: Hash + Eq + Clone, Item: ItemSize> LfuCache<Key, Item> {
 
     pub fn get(&mut self, key: &Key) -> Option<&Item> {
         if let Some((item, frequency, priority)) = self.key_val.get_mut(key) {
-            if let Some(res) = frequency.checked_add(1) {
-                *frequency = res;
+            if let Some(result) = frequency.checked_add(1) {
+                *frequency = result;
                 self.heap.push(CacheEntry {
                     key: key.clone(),
                     frequency: *frequency,
